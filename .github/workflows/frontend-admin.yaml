@@ -1,0 +1,57 @@
+name: Github Actions CI/CD to deploy Frontend Admin Service of Interview Test on my EKS Cluster
+
+on:
+  push:
+    branches:
+      - "main"
+jobs:
+  deploy:
+    name: Deploy to Eks Cluster
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    
+    - name: Set short git commit SHA
+      id: commit
+      uses: prompt/actions-commit-hash@v2
+    
+    - name: Install kubectl
+      run: |
+        curl -LO https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl
+        chmod +x ./kubectl
+        sudo mv ./kubectl /usr/local/bin/kubectl
+        kubectl version --client
+
+    - name: Configure AWS CLI
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.ACCESS_KEY }}
+        aws configure set aws_secret_access_key ${{ secrets.SECRET_KEY }}
+        aws configure set default.region ${{ secrets.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 124355654427.dkr.ecr.us-east-1.amazonaws.com
+
+    - name: Docker Build
+      run: |
+        cd frontend
+        docker build --no-cache -t test-interview-frontend-admin-service .
+
+    - name: Docker Tag
+      run: |
+        docker tag test-interview-frontend-admin-service:latest 124355654427.dkr.ecr.us-east-1.amazonaws.com/test-interview-frontend-admin-service:${{ github.run_id }}
+
+    - name: Docker Push
+      run: |
+        docker push 124355654427.dkr.ecr.us-east-1.amazonaws.com/test-interview-frontend-admin-service:${{ github.run_id }}
+
+    - name: Update kube config
+      run: |
+        aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
+    
+    - name: Deploy to EKS
+      run: |
+        /usr/local/bin/kubectl set image deployment/frontend-admin-service frontend-admin=124355654427.dkr.ecr.us-east-1.amazonaws.com/test-interview-frontend-admin-service:${{ github.run_id }} -n interview-ns
+        /usr/local/bin/kubectl rollout restart deployment frontend-admin-service -n interview-ns
